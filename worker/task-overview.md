@@ -1,10 +1,10 @@
 # OpenBee Stage1 Demo Training and VStar Evaluation — Mini Worker
 
-Train OpenBee Stage1 for **1000 steps with a checkpoint every 100 steps** (10
-ckpts saved), evaluate **the subset at multiples of 250 steps** (4 evals: at
-iter_250, iter_500, iter_750, iter_1000) on `VStarBench` using VLMEvalKit, and
-produce a final report. The intermediate saved ckpts (iter_100, _200, _300,
-_400, _600, _700, _800, _900) exist on disk but are NOT evaluated.
+Train OpenBee Stage1 for **1200 steps with a checkpoint every 200 steps** (6
+ckpts saved), evaluate **the subset at multiples of 400 steps** (3 evals: at
+iter_400, iter_800, iter_1200) on `VStarBench` using VLMEvalKit, and produce
+a final report. The intermediate saved ckpts (iter_200, iter_600, iter_1000)
+exist on disk but are NOT evaluated.
 
 This is the worker half of a tiny two-harness agent system driven by the bundled
 generic watchdog. The supervisor (`../supervisor/task-overview.md`) only
@@ -21,23 +21,28 @@ adjudicates if goal is not met — you handle all problems yourself.
 
 ## How you're driven
 
-A generic watchdog (`../watchdog/watchdog.py`) spawns this session. On every
-wake, read your wake envelope at `<run_root>/wake_envelopes/worker.json`. On
-every sleep, write `<run_root>/hooks.json` describing when you want to be
-woken next, then exit. **The watchdog deletes `hooks.json` on every
-dispatch, so you must write a fresh one each wake — even if your intent is
-"keep the same hooks". Not re-writing it sends you straight to the
-supervisor's no-hook handoff.**
+A generic watchdog (`../watchdog/watchdog.py`) spawns this session. On
+every wake, read your wake envelope at
+`<run_root>/wake_envelopes/worker.json`. On every sleep, write
+`<run_root>/hooks.json` describing when you want to be woken next,
+then exit.
 
-**Read `../FILESYSTEM_CONTRACT.md` once** for the formal schemas of
-the wake envelope and `hooks.json`. The mechanics:
+**Read `../FILESYSTEM_CONTRACT.md` once** — it has the formal schemas
+for `hooks.json` and the wake envelope, the supervisor verdict
+contract, and the watchdog's tick-ordering rules (sanity_check
+deferral, hook polling suppressed during supervisor wakes, supervisor
+verdict winning over concurrent hook fire). Don't duplicate that
+content here; refer back as needed.
 
-- A hook is `{id, after_seconds, condition_script?, wake_message}`. It fires when
-  the timer expires or the condition script (a bash file you write) prints `true`.
-- `wake_message` becomes the wake envelope on fire — you choose `wake_reason` and
-  whatever fields you want the next wake to see.
-- Whether and when to register a hook is your call. Use one when you're genuinely
-  waiting (training progressing, a new ckpt to appear) to help saving tokens.
+Two operational reminders that are easy to get wrong:
+
+- The watchdog deletes `hooks.json` on every dispatch, so you must
+  write a fresh one each wake — even if your intent is "keep the same
+  hooks". Not re-writing it sends you straight to the supervisor's
+  no-hook handoff.
+- Use hooks sparingly. Register one only when you're genuinely waiting
+  for an external event (training progressing, a new ckpt to appear).
+  Don't chain sequential work via 1-second hooks.
 
 ## 1. Set up the mvp-engine environment
 
@@ -68,18 +73,18 @@ hf download mvp-lab/Qwen3-VL-8B-Base-woDS-stage0 \
 Skip downloads if the target already has the expected files at non-zero size
 (idempotent re-entry after a transient failure).
 
-## 3. Submit the training sbatch (1000 steps, checkpoint every 100)
+## 3. Submit the training sbatch (1200 steps, checkpoint every 200)
 
 Fill the template at `../examples/stage1_demo.sbatch.template`:
-`__TOTAL_TRAINING_STEPS__=1000`, `__EVAL_CADENCE_STEPS__=100` (this placeholder
+`__TOTAL_TRAINING_STEPS__=1200`, `__EVAL_CADENCE_STEPS__=200` (this placeholder
 name is a historical misnomer — it maps to the recipe's `checkpoint.interval`,
 which is the *save* cadence; the eval cadence is independent and is described
 above). The template's hardcoded `checkpoint.keep_n=__TOTAL_TRAINING_STEPS__`
-ensures all 10 saved ckpts survive. Plus the other placeholders (paths, env
+ensures all 6 saved ckpts survive. Plus the other placeholders (paths, env
 vars). Write to `<run_root>/training/run.sbatch` and submit via `sbatch --parsable`.
 
-**Important: only iter_250, iter_500, iter_750, iter_1000 get evaluated.** Your
-ckpt-discovery hook condition_script should filter for `step % 250 == 0` (don't
+**Important: only iter_400, iter_800, iter_1200 get evaluated.** Your
+ckpt-discovery hook condition_script should filter for `step % 400 == 0` (don't
 fire on intermediate saved ckpts) — otherwise you'll waste GPU time on evals
 you don't need.
 
@@ -156,7 +161,7 @@ self) to read. Keep it terse — bullets, not essays.
 
 ## 6. Finalize
 
-When all 4 evaluated checkpoints (iter_250, _500, _750, _1000) have results
+When all 3 evaluated checkpoints (iter_400, iter_800, iter_1200) have results
 AND training is `COMPLETED`, write `<run_root>/workspace/final_report.md`
 (in the same wake, no need for a hook):
 
