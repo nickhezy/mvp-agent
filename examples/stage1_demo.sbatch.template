@@ -1,0 +1,61 @@
+#!/bin/bash
+# mvp-agent sbatch template — basic_vlm stage1 demo.
+#
+# Cluster-level allocation is hardcoded here (partition, account, qos, gres)
+# per project policy. Per-run knobs are placeholders surrounded by double
+# underscores; the worker's launch_training state substitutes them at
+# submission time using values from spec.md and the watchdog-provided
+# run context. Do NOT remove the placeholder markers when editing — the
+# substitution logic looks for them by exact match.
+#
+# The three lines starting with `#   loop.total_steps=`,
+# `#   checkpoint.interval=`, and `#   checkpoint.hf_enable=true` are
+# required by the worker's launch_training validator. Keep them present
+# even though the same values are also passed as torchrun overrides
+# below.
+#   loop.total_steps=__TOTAL_TRAINING_STEPS__
+#   checkpoint.interval=__EVAL_CADENCE_STEPS__
+#   checkpoint.hf_enable=true
+
+#SBATCH --job-name=__JOB_NAME__
+#SBATCH --partition=gpu
+#SBATCH --account=proj_agent
+#SBATCH --qos=high
+#SBATCH --gres=gpu:h200:2
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=1-00:00:00
+#SBATCH --chdir=__RUN_DIR__/training
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
+
+set -euo pipefail
+
+MVP_ENGINE_ROOT="__MVP_ENGINE_ROOT__"
+cd "${MVP_ENGINE_ROOT}"
+
+# shellcheck source=/dev/null
+source .venv/bin/activate
+
+# Route the recipe's outputs/ at the watchdog-provided directory so the
+# `## Checkpoint Glob` spec field matches what gets produced. The worker
+# exports MVP_AGENT_TRAINING_OUTPUT_DIR before calling sbatch.
+EXTRA=()
+if [[ -n "${MVP_AGENT_TRAINING_OUTPUT_DIR:-}" ]]; then
+  EXTRA+=("project.dir=${MVP_AGENT_TRAINING_OUTPUT_DIR}")
+fi
+
+torchrun \
+  --standalone \
+  --nproc_per_node=2 \
+  -m mvp_engine.launch \
+  --config ./recipes/basic_vlm/configs/stage1.yaml \
+  loop.total_steps=__TOTAL_TRAINING_STEPS__ \
+  checkpoint.interval=__EVAL_CADENCE_STEPS__ \
+  checkpoint.hf_enable=true \
+  checkpoint.keep_n=__TOTAL_TRAINING_STEPS__ \
+  "${EXTRA[@]}"
+# Note: keep_n is set to total_steps so NO checkpoint is pruned by retention.
+# The recipe's default keep_n=2 would prune earlier checkpoints before our
+# async eval pipeline gets to them. Setting keep_n=total_steps ensures every
+# checkpoint at every checkpoint.interval survives until the run completes.
