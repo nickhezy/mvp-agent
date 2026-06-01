@@ -1,13 +1,10 @@
-# mvp-agent-mini
+# mvp-agent
 
 A self-contained agent harness for long-horizon experiments. The bundled
 example runs the OpenBee stage1 demo (train Qwen3-VL-8B-stage0 → save
 checkpoints → evaluate each on VStarBench → write a final report), but
 the watchdog and the contract are generic — only the prose in
 `worker/task-overview.md` is task-specific. No external code dependencies.
-
-(The `-mini` suffix is a local repo-naming convention. The system itself
-is general-purpose.)
 
 ## Components
 
