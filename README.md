@@ -4,7 +4,8 @@ A self-contained agent harness for long-horizon experiments. The bundled
 example runs the OpenBee stage1 demo (train Qwen3-VL-8B-stage0 → save
 checkpoints → evaluate each on VStarBench → write a final report), but
 the watchdog and the contract are generic — only the prose in
-`worker/task-overview.md` is task-specific. No external code dependencies.
+[`worker/task-overview.md`](worker/task-overview.md) is task-specific.
+No external code dependencies.
 
 The cross-component contract — hook schema, wake envelope schema,
 supervisor verdict schema, and the watchdog's tick-ordering rules — lives
@@ -12,11 +13,37 @@ in [`FILESYSTEM_CONTRACT.md`](FILESYSTEM_CONTRACT.md). Read it first if
 you're modifying any component; everything below is a summary of what
 that file specifies.
 
+```
+                ┌────────────────────────────────────────────────┐
+                │                    watchdog                    │
+                │     single Python loop; no task knowledge      │
+                └────┬───────────────────────────────────────┬───┘
+       spawn + env   │                                       │   spawn + env
+        var (per     │                                       │    var (on
+       fired hook)   ▼                                       ▼   worker no-hook
+              ┌──────────────┐                       ┌──────────────┐   exit OR
+              │    worker    │                       │  supervisor  │   sanity_check
+              │ (claude -p,  │                       │ (claude -p,  │   heartbeat)
+              │   --resume)  │                       │   --resume)  │
+              └──────┬───────┘                       └──────┬───────┘
+                     │ on sleep,                            │ on exit,
+                     │ writes                               │ writes one of
+                     ▼                                      ▼
+            <run_dir>/hooks.json              <run_dir>/supervisor_verdict/
+              (consumed +                       wake.json   → wake worker
+               cleared by                       terminate.json → stop run
+               watchdog on                      (or no file = noop, valid
+               next dispatch)                   only for sanity_check)
+
+  Wakes deliver the envelope at <run_dir>/wake_envelopes/{worker,supervisor}.json
+  (also as $MVP_AGENT_WAKE_ENVELOPE in the spawned process's env).
+```
+
 ## Components
 
 Three components communicate through files in a single run directory.
 
-### 1. Watchdog (`watchdog/watchdog.py`)
+### 1. Watchdog ([`watchdog/watchdog.py`](watchdog/watchdog.py))
 
 A single-file Python program, stdlib only. Pure scheduler with zero
 task knowledge. Each tick (default 10 s) it:
@@ -27,7 +54,8 @@ task knowledge. Each tick (default 10 s) it:
 4. Evaluates the worker's hook conditions and dispatches the first that fires.
 5. Optionally dispatches a periodic sanity-check supervisor.
 
-It enforces three schemas (full definitions in `FILESYSTEM_CONTRACT.md`):
+It enforces three schemas (full definitions in
+[`FILESYSTEM_CONTRACT.md`](FILESYSTEM_CONTRACT.md)):
 
 - **Hook** — `<run_dir>/hooks.json`, an array of `{id, after_seconds,
   condition_script?, wake_message}`. The worker writes this on every
@@ -46,22 +74,29 @@ are not evaluated while the supervisor is running, supervisor verdicts
 win over concurrent hook fires, and `terminate.json` stops the loop
 immediately.
 
-### 2. Worker (`worker/task-overview.md`)
+### 2. Worker ([`worker/task-overview.md`](worker/task-overview.md))
 
 The agent that does the actual work. One prose file — no `states/`
 subdirectory, no `skills/` tree. It is invoked via `claude -p` (the
-bundled `examples/claude_wrapper.sh` handles session capture on the
-first invocation and `--resume <session_id>` thereafter, so the
-conversation context persists across wakes).
+bundled [`examples/claude_wrapper.sh`](examples/claude_wrapper.sh)
+handles session capture on the first invocation and
+`--resume <session_id>` thereafter, so the conversation context
+persists across wakes).
+
+Inside the prose, only the **"How you're driven"** section ties the
+worker to this harness (envelope read, hooks write, sleep protocol).
+Every other section — Resources, environment setup, training submit,
+per-checkpoint evaluation, finalize — is task content. Swap that
+content out and the same harness drives any other long-horizon job.
 
 On each wake the worker reads its envelope at
-`<run_dir>/wake_envelopes/worker.json`, does some work
-(sets up the env, submits the training job, evaluates a stable
-checkpoint, etc.), and on sleep writes a fresh `hooks.json` describing
-the conditions under which it wants to be woken next. If it exits
-without writing any hooks, the watchdog hands off to the supervisor.
+`<run_dir>/wake_envelopes/worker.json`, does some work (sets up the
+env, submits the training job, evaluates a stable checkpoint, etc.),
+and on sleep writes a fresh `hooks.json` describing the conditions
+under which it wants to be woken next. If it exits without writing any
+hooks, the watchdog hands off to the supervisor.
 
-### 3. Supervisor (`supervisor/task-overview.md`)
+### 3. Supervisor ([`supervisor/task-overview.md`](supervisor/task-overview.md))
 
 The agent that decides termination. Also a single prose file, also
 `claude -p`-driven. Woken in three situations:
@@ -109,11 +144,13 @@ land under `<run_dir>/logs/`, the per-component session ids under
 `<run_dir>/workspace/work_log.md`.
 
 For long-running experiments where you don't want the watchdog tied
-to your shell, a Slurm wrapper is bundled:
+to your shell, a Slurm wrapper is bundled at
+[`examples/watchdog.sbatch`](examples/watchdog.sbatch):
 
 ```bash
 sbatch --export=ALL,MVP_AGENT_RUN_DIR=/abs/path/to/run examples/watchdog.sbatch
 ```
 
 If this repo lives somewhere other than the hardcoded default in
-`examples/watchdog.sbatch`, also export `MVP_AGENT_MINI_ROOT`.
+[`examples/watchdog.sbatch`](examples/watchdog.sbatch), also export
+`MVP_AGENT_MINI_ROOT`.
