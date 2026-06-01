@@ -6,6 +6,12 @@ checkpoints → evaluate each on VStarBench → write a final report), but
 the watchdog and the contract are generic — only the prose in
 `worker/task-overview.md` is task-specific. No external code dependencies.
 
+The cross-component contract — hook schema, wake envelope schema,
+supervisor verdict schema, and the watchdog's tick-ordering rules — lives
+in [`FILESYSTEM_CONTRACT.md`](FILESYSTEM_CONTRACT.md). Read it first if
+you're modifying any component; everything below is a summary of what
+that file specifies.
+
 ## Components
 
 Three components communicate through files in a single run directory.
@@ -74,8 +80,8 @@ or `reason: "escalated: ..."`).
 ## Layout
 
 ```
-watchdog/watchdog.py
-FILESYSTEM_CONTRACT.md
+watchdog/watchdog.py              # generic scheduler (Python stdlib only)
+FILESYSTEM_CONTRACT.md            # the cross-component contract — read first
 worker/task-overview.md
 supervisor/task-overview.md
 examples/
